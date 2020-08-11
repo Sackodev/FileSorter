@@ -11,16 +11,33 @@ import threading
 import time
 
 # FEATURES TO ADD
-# Back button for when you misclick
+# Back button for when you misclick (up to like 50-100 images?)
 # Maybe make directory buttons bigger or aligned better?
 # Rename directory?
 # Add duplicate scanner as a misc function?
+# File type selector?
+# Browse all images mode?
+# Allow directory change after selected first time
+# Image ending fixer? (.jpg:large and such, maybe check file headers, webp?)
+# Open file in image viewer/view full-size image
+# Make sure files aren't being overwritten
 #
-
+# TO FIX
+# After moving a GIF, sometimes it stops playing and the image doesn't change like it should
+#    -Still picks a new image, just doesn't display it
+#    -If you move to a diff folder, it moves that new image
+# Some files seem to save wrong
+#    -Some pngs saved as jpgs
+#    -Infrequent; could be after a gif save?
+#    -Name in text box changes too
+# Gifs occasionally break and turn ugly
+#    -Still works, just colors mess up
+# Some gifs give divide by zero error
+#    -Something about gif_img.info['duration'] not existing (ex. no_no_no.gif)
 
 
 # supported file types
-supported_types = ["png", "jpg", "gif", "jpeg"]
+supported_types = ["png", "jpg", "gif", "jpeg", "jpg:large", "png:large", "jpg_large", "webp"]
 # full path to file
 file_path = []
 # name of file with extension
@@ -111,8 +128,10 @@ def randimg():
         while (True):
             num = random.randint(0, len(file_name) - 1)
             if file_ext[num] in supported_types:
+                print(file_name[num])
                 break
         
+        #gif handling
         if file_ext[num] == "gif":
             gif_frames = []
             gif_img = Image.open(file_path[num])
