@@ -7,6 +7,17 @@ import math
 import random
 import os
 from functools import partial
+import threading
+import time
+
+# FEATURES TO ADD
+# Back button for when you misclick
+# Maybe make directory buttons bigger or aligned better?
+# Rename directory?
+# Add duplicate scanner as a misc function?
+#
+
+
 
 # supported file types
 supported_types = ["png", "jpg", "gif", "jpeg"]
@@ -27,7 +38,6 @@ dir_names = []
 # add break to not include subdirectories
 
 root_path = ""
-#root_path = '/home/sackowee/Pictures/'
 #if root_path[-1] != os.path.sep:
 #    root_path = root_path + os.path.sep
 #    print("NOOO")
@@ -89,8 +99,9 @@ def img_resizer(side_max):
     return resized
 
 def randimg():
-    global num
+    global num, gif_frames, play_gif, gif_duration, gif_avg_time
     img_update()
+    dir_update()
     file_exists = False
     for i in file_ext:
         if i in supported_types:
@@ -101,8 +112,31 @@ def randimg():
             num = random.randint(0, len(file_name) - 1)
             if file_ext[num] in supported_types:
                 break
-
-        resized = img_resizer(350)
+        
+        if file_ext[num] == "gif":
+            gif_frames = []
+            gif_img = Image.open(file_path[num])
+            i = 0
+            gif_duration = 0
+            gif_avg_time = 0
+            while True:
+                try:
+                    gif_img.seek(i)
+                    gif_duration += gif_img.info['duration']
+                    gif_frames.append(gif_img.copy())
+                    # PIL Image object can be resized
+                    gif_frames[i] = gif_frame_resize(gif_frames[i], 400)
+                    i += 1
+                except Exception as e:
+                    print(e)
+                    gif_avg_time = (gif_duration/len(gif_frames))/1000
+                    play_gif = True
+                    gif_player()
+                    resized = img_resizer(400)
+                    break
+        else:
+            play_gif = False
+            resized = img_resizer(400)
 
         img = ImageTk.PhotoImage(resized)
 
@@ -118,6 +152,26 @@ def randimg():
         rename_tbox.insert(0, file_name_noext[num])
     else:
         info_text_change("No more compatible files to sort!", 1)
+
+def gif_frame_resize(orig, side_max):
+    width, height = orig.size
+
+    if width > side_max and width > height:
+        ratio = height/width
+        width = side_max
+        height = math.floor(width * ratio)
+    elif height > side_max and height > width:
+        ratio = width/height
+        height = side_max
+        width = math.floor(height * ratio)
+    elif width == height and width > side_max:
+        width, height = side_max, side_max
+
+    #creates image with new dimensions
+    resized = orig.resize((width,height),Image.ANTIALIAS)
+
+    # returns pil image
+    return resized
 
 def rename():
     global file_name, file_path, file_name_noext
@@ -156,7 +210,6 @@ def move_file(d_name):
     else:
         del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
         randimg()
-    print(d_name + os.path.sep)
 
 def make_dir():
     global dir_win
@@ -259,6 +312,28 @@ def dir_select_window():
     dir_button = tk.Button(bot_fr, text="Select directory...", command=choose_directory)
     dir_button.pack(side='left')
 
+def gif_loop():
+    global gif_timer, gif_frame_num, img
+    if play_gif != False:
+        gif_frame_num += 1
+        if gif_frame_num >= len(gif_frames):
+            gif_frame_num = 0
+        # turns PIL Image into an ImageTk PhotoImage object
+        img = ImageTk.PhotoImage(gif_frames[gif_frame_num])
+        panel.configure(image=img)
+        panel.image = img
+        gif_timer = threading.Timer(gif_avg_time, gif_loop)
+        gif_timer.start()
+    else:
+        gif_timer.cancel()
+
+def gif_player():
+    global play_gif, gif_timer
+    play_gif = True
+    gif_frame_num = 0
+    gif_timer = threading.Timer(1, gif_loop)
+    gif_timer.start()
+
 def main_window():
     global root_path, window, top_frame, bottom_frame, info_frame, img_frame, rename_frame, button_frame, dir_margin, dir_header, dir_frame, create_folder_frame, dir_frame_col1, dir_frame_col2, dir_frame_col3, info_text, panel, rename_butt, rand_butt, rename_val, rename_tbox, rename_ext, newdir_val, dir_buttons, create_folder_butt, resized, img, dir_win
 
@@ -313,7 +388,7 @@ def main_window():
     info_text.pack()
 
     # label where the image is displayed
-    panel = tk.Label(img_frame, height = 350, width = 350)
+    panel = tk.Label(img_frame, height = 400, width = 400)
     panel.pack(side='bottom', fill="both", expand="yes")
 
     # button for rename operation
@@ -359,12 +434,19 @@ window = top_frame = bottom_frame = info_frame = img_frame = rename_frame = butt
 
 #creates tkinter window with options
 window = tk.Tk()
-window.title("Picture!")
+window.title("File Sorter")
 window.geometry("450x850")
 window.resizable(width=False, height=True)
 #window.configure(background='grey')
 
 dir_buttons = []
+
+play_gif = False
+gif_frames = []
+gif_timer = ""
+gif_frame_num = 0
+gif_duration = 0
+gif_avg_time = 0
 
 dir_select = ""
 dir_select_window()
