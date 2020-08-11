@@ -1,6 +1,7 @@
 import os
 import sys
 import tkinter.filedialog
+from tkinter import messagebox
 import tkinter as tk
 from PIL import ImageTk, Image
 import math
@@ -195,16 +196,22 @@ def gif_frame_resize(orig, side_max):
 def rename():
     global file_name, file_path, file_name_noext
     new_name = rename_val.get() + "." + file_ext[num]
-    try:
-        os.rename(file_path[num], file_dir[num] + new_name)
-        info_text_change("The file name was changed to: " + new_name, 0)
-        
-        file_name[num] = rename_val.get() + "." + file_ext[num]
-        file_path[num] = file_dir[num] + file_name[num]
-        file_name_noext[num] = rename_val.get()
-    except Exception as e:
-        info_text_change("File name change unsuccessful :(", 1)
-        print(e)
+    new_path = file_dir[num] + new_name
+    if not os.path.exists(new_path) and new_name != file_name[num]:
+        try:
+            os.rename(file_path[num], file_dir[num] + new_name)
+            info_text_change("The file name was changed to: " + new_name, 0)
+                
+            file_name[num] = rename_val.get() + "." + file_ext[num]
+            file_path[num] = file_dir[num] + file_name[num]
+            file_name_noext[num] = rename_val.get()
+        except Exception as e:
+            info_text_change("File name change unsuccessful :(", 1)
+            print(e)
+    elif new_name == file_name[num]:
+        info_text_change("New file name wasn't given!", 1)
+    else:
+        info_text_change("File already exists with that name!", 1)
 
 def info_text_change(msg, type):
     if type == 0:
@@ -222,13 +229,21 @@ def info_text_clear():
 
 def move_file(d_name):
     global file_path, file_name, file_dir, file_name_noext, file_ext
-    try:
-        os.rename(file_path[num], root_path + d_name + os.path.sep + file_name[num])
-    except Exception as e:
-        print(e)
+    new_path = root_path + d_name + os.path.sep + file_name[num]
+    print(new_path)
+    print(file_path[num])
+    if not os.path.exists(new_path):
+        try:
+            os.rename(file_path[num], root_path + d_name + os.path.sep + file_name[num])
+        except Exception as e:
+            info_text_change("File move failed :(", 1)
+            print(e)
+        else:
+            info_text_change("File '" + file_name[num] + "' was moved to '" + d_name + "' folder!", 0)
+            del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
+            randimg()
     else:
-        del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
-        randimg()
+        info_text_change("File name already exists in that folder!", 1)
 
 def make_dir():
     global dir_win
@@ -299,25 +314,42 @@ def choose_directory():
     global root_path
     dir_select.attributes('-topmost', False)
     chosen_dir = tk.filedialog.askdirectory()
+    # if a directory was chosen, the main window is created
     # if nothing selected, program exits
     if not chosen_dir:
         sys.exit()
-    # if a directory was chosen, the main window is created
     else:
         root_path = chosen_dir + os.path.sep
-        dir_select.destroy()
-        main_window()
+        img_update()
+        file_exists = False
+        for i in file_ext:
+            # if file type supported, the main program is started and the directory dialog is closed
+            if i in supported_types:
+                file_exists = True
+                dir_select.destroy()
+                main_window()
+                break
+        # if no files have a compatible type, the program asks for a different directory
+        if file_exists == False:
+            dir_select.attributes('-topmost', True)
+            msg = "Chosen directory doesn't contain compatible file types. Pick a different directory."
+            dir_label.configure(text=msg, wraplength=370)
 
 # first window that pops up
 # tells the user to select a directory to use the program
+
 def dir_select_window():
-    global dir_select
+    global dir_select, dir_label
     dir_select = tk.Toplevel()
+    # forces this dialog box to be on top of the other window
     dir_select.attributes('-topmost', True)
+    # makes this dialog box focused
     dir_select.focus_force()
     dir_select.geometry("400x100")
     dir_select.title("Directory Selection")
     dir_select.resizable(width=False, height=False)
+    # closes the program if the dialog box is closed
+    dir_select.protocol("WM_DELETE_WINDOW", sys.exit)
 
     margin = tk.Frame(dir_select, height=20)
     margin.pack()
@@ -328,6 +360,7 @@ def dir_select_window():
     
     dir_label = tk.Label(top_fr, text="Pick a directory to sort through: ")
     dir_label.pack(side="top")
+    # if clicked, dialog box pops up for selecting a folder
     dir_button = tk.Button(bot_fr, text="Select directory...", command=choose_directory)
     dir_button.pack(side='left')
 
@@ -352,6 +385,25 @@ def gif_player():
     gif_frame_num = 0
     gif_timer = threading.Timer(1, gif_loop)
     gif_timer.start()
+
+def delete_file():
+    global file_path, file_name, file_dir, file_name_noext, file_ext
+    MsgBox = messagebox.askquestion('Delete File', 'Are you sure you want to delete this file?', icon='warning')
+    if MsgBox == 'yes':
+        if os.path.exists(file_path[num]):
+            try:
+                os.remove(file_path[num])
+            except Exception as e:
+                info_text_change("File could not be deleted :(", 1)
+                print(e)
+            else:
+                info_text_change("File '" + file_name[num] + "' was deleted!", 0)
+                del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
+                randimg()
+        else:
+            info_text_change("File could not be deleted :(", 1)
+
+
 
 def main_window():
     global root_path, window, top_frame, bottom_frame, info_frame, img_frame, rename_frame, button_frame, dir_margin, dir_header, dir_frame, create_folder_frame, dir_frame_col1, dir_frame_col2, dir_frame_col3, info_text, panel, rename_butt, rand_butt, rename_val, rename_tbox, rename_ext, newdir_val, dir_buttons, create_folder_butt, resized, img, dir_win
@@ -416,6 +468,9 @@ def main_window():
     # button for random file operation
     rand_butt = tk.Button(button_frame, text="Random file", command=rand_butt_click)
     rand_butt.pack(side= 'left')
+    # button to delete file
+    delete_butt = tk.Button(button_frame, text="Delete file", command=delete_file, fg="red")
+    delete_butt.pack(side= 'bottom')
 
     # textbox for renaming the current file
     rename_val = tk.StringVar()
@@ -460,14 +515,22 @@ window.resizable(width=False, height=True)
 
 dir_buttons = []
 
+# gif-related variables
+# used to tell when picture is a gif
 play_gif = False
+# stores each gif image/frame
 gif_frames = []
+# stores the timer
 gif_timer = ""
+# gif frame counter
 gif_frame_num = 0
+# stores entire gif duration
 gif_duration = 0
+# average time per frame
 gif_avg_time = 0
 
 dir_select = ""
+dir_label = ""
 dir_select_window()
 
 window.mainloop()
