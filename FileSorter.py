@@ -10,6 +10,7 @@ import os
 from functools import partial
 import threading
 import time
+import webbrowser
 
 # FEATURES TO ADD
 # Back button for when you misclick (up to like 50-100 images?)
@@ -17,11 +18,10 @@ import time
 # Rename directory?
 # Add duplicate scanner as a misc function?
 # File type selector?
-# Browse all images mode?
-# Allow directory change after selected first time
 # Image ending fixer? (.jpg:large and such, maybe check file headers, webp?)
-# Open file in image viewer/view full-size image
-# Make sure files aren't being overwritten
+# Make sure files aren't being overwritten - DONE
+#     -Give user option to automatically add prefix to file name when needed
+# File (MIME) type checker for images? Sometimes, pngs are jpgs, etc
 #
 # TO FIX
 # After moving a GIF, sometimes it stops playing and the image doesn't change like it should
@@ -31,11 +31,9 @@ import time
 #    -Some pngs saved as jpgs
 #    -Infrequent; could be after a gif save?
 #    -Name in text box changes too
-# Gifs occasionally break and turn ugly
-#    -Still works, just colors mess up
-# Some gifs give divide by zero error
-#    -Something about gif_img.info['duration'] not existing (ex. no_no_no.gif)
-
+# GIF colors break occasionally (maybe after a file move?)
+# GIFs sometimes prevent the next image from showing up (Not as often as before though!)
+# GIFs sometimes play really fast (rare)
 
 # supported file types
 supported_types = ["png", "jpg", "gif", "jpeg", "jpg:large", "png:large", "jpg_large", "webp"]
@@ -52,6 +50,11 @@ file_ext = []
 # immediate directory names
 dir_names = []
 
+# stores gif thread for displaying frames in a gif file
+gif_thread = ""
+# lock for gif thread
+gif_lock = threading.Lock()
+
 # gets all files in folder
 # add break to not include subdirectories
 
@@ -65,12 +68,15 @@ num = 0
 
 def img_update():
     global file_path, file_name, file_dir, file_name_noext, file_ext, dir_names
+    # set to blank whenever they're updated
     file_path = []
     file_name = []
     file_dir = []
     file_name_noext = []
     file_ext = []
 
+    # gets list of all files in current directory (not including subdirectories)
+    # also gets all immediate subdirectory names
     for (dirpath, dirnames, filenames) in os.walk( root_path ):
         file_path.extend(os.path.join(dirpath, filename) for filename in filenames)
         file_name.extend(os.path.join(filename) for filename in filenames)
@@ -79,6 +85,7 @@ def img_update():
         dir_names = dirnames
         break
 
+    # sorts the immediate directories
     dir_names.sort()
 
     # gets file name without extension and its extension into separate variables
@@ -92,6 +99,7 @@ def img_update():
             file_name_noext.append(file_name)
             file_ext.append("NO_EXT")
 
+# resizes image to fit in tkinter's image display box
 def img_resizer(side_max):
     #gets image from path
     orig = Image.open(file_path[num])
@@ -99,14 +107,17 @@ def img_resizer(side_max):
     # gets width and height for resizing
     width, height = orig.size
     
+    # if width greater and is too big for the box, resize to fit based on width
     if width > side_max and width > height:
         ratio = height/width
         width = side_max
         height = math.floor(width * ratio)
+    # if height greater and is too big for the box, resize to fit based on height
     elif height > side_max and height > width:
         ratio = width/height
         height = side_max
         width = math.floor(height * ratio)
+    # if sides are equal but still too big for the box, resize both to fit box
     elif width == height and width > side_max:
         width, height = side_max, side_max
 
@@ -116,8 +127,21 @@ def img_resizer(side_max):
     # returns pil image
     return resized
 
-def randimg():
-    global num, gif_frames, play_gif, gif_duration, gif_avg_time
+# picks a random image
+def randimg(fn_old = None):
+    global num, gif_frames, play_gif, gif_duration, gif_avg_time, play_gif, gif_thread
+    if not isinstance(gif_thread, str):
+        play_gif = False
+        time.sleep(.1)
+        gif_thread = ""
+    if fn_old is not None:
+        file_name_old = fn_old
+    else:
+        if num != 0:
+            file_name_old = file_name[num]
+        else:
+            file_name_old = None
+    file_count_old = len(file_name)
     img_update()
     dir_update()
     file_exists = False
@@ -126,13 +150,20 @@ def randimg():
             file_exists = True
             break
     if file_exists:
+        # picks a random compatible file that is not the same as the last file, if possible
         while (True):
+            # picks random file from list
             num = random.randint(0, len(file_name) - 1)
+            # checks if selected file is supported; if it isn't compatible, another number is chosen
             if file_ext[num] in supported_types:
-                print(file_name[num])
+                # prevents selecting the same file twice if it can be avoided
+                # len(file_name) used to get size of file list
+                if file_name_old == file_name[num] and len(file_name) != 1:
+                    continue
+                # if selected file gets through all the checks, the file is kept and the loop is ended
                 break
         
-        #gif handling
+        # gif handling
         if file_ext[num] == "gif":
             gif_frames = []
             gif_img = Image.open(file_path[num])
@@ -148,31 +179,33 @@ def randimg():
                     gif_frames[i] = gif_frame_resize(gif_frames[i], 400)
                     i += 1
                 except Exception as e:
-                    print(e)
+                    #print(e)
                     gif_avg_time = (gif_duration/len(gif_frames))/1000
                     play_gif = True
                     gif_player()
                     resized = img_resizer(400)
                     break
         else:
-            play_gif = False
             resized = img_resizer(400)
 
-        img = ImageTk.PhotoImage(resized)
+        if not len(file_name) == 1 and not file_count_old == 1:
+            img = ImageTk.PhotoImage(resized)
 
-        panel.configure(image=img)
-        panel.image = img
+            panel.configure(image=img)
+            panel.image = img
 
-        rename_ext.configure(text="." + file_ext[num])
-        rename_ext.text = "." + file_ext[num]
+            rename_ext.configure(text="." + file_ext[num])
+            rename_ext.text = "." + file_ext[num]
 
-        # clears the textbox
-        rename_tbox.delete(0, tk.END)
-        # places a default value in the textbox
-        rename_tbox.insert(0, file_name_noext[num])
+            # clears the textbox
+            rename_tbox.delete(0, tk.END)
+            # places a default value in the textbox
+            rename_tbox.insert(0, file_name_noext[num])
     else:
         info_text_change("No more compatible files to sort!", 1)
 
+# used to resize each image in a gif to fit the tkinter image box; works similarly to img_resizer
+# maybe fix later to reduce redundancy
 def gif_frame_resize(orig, side_max):
     width, height = orig.size
 
@@ -190,7 +223,7 @@ def gif_frame_resize(orig, side_max):
     #creates image with new dimensions
     resized = orig.resize((width,height),Image.ANTIALIAS)
 
-    # returns pil image
+    # returns resized pil image
     return resized
 
 def rename():
@@ -229,19 +262,31 @@ def info_text_clear():
 
 def move_file(d_name):
     global file_path, file_name, file_dir, file_name_noext, file_ext
-    new_path = root_path + d_name + os.path.sep + file_name[num]
-    print(new_path)
-    print(file_path[num])
+    # if the user renamed the file without hitting the rename button first, it renames the file as well as moves the files
+    if rename_val.get() != file_name_noext[num]:
+        new_path = root_path + d_name + os.path.sep + rename_val.get() + "." + file_ext[num]
+    # creates the file's new path without renaming it if the rename value wasn't changed
+    else:
+        new_path = root_path + d_name + os.path.sep + file_name[num]
+    # checks if a file with that name already exists
     if not os.path.exists(new_path):
+        # program attempts to move file
         try:
-            os.rename(file_path[num], root_path + d_name + os.path.sep + file_name[num])
+            os.rename(file_path[num], new_path)
+        # if fails, throws error
         except Exception as e:
             info_text_change("File move failed :(", 1)
             print(e)
+        # if success, notifies the user
         else:
-            info_text_change("File '" + file_name[num] + "' was moved to '" + d_name + "' folder!", 0)
-            del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
-            randimg()
+            if rename_val.get() != file_name_noext[num]:
+                info_text_change("File '" + rename_val.get() + "." + file_ext[num] + "' was moved to '" + d_name + "' folder!", 0)
+            else:
+                info_text_change("File '" + file_name[num] + "' was moved to '" + d_name + "' folder!", 0)
+            fn_old = file_name[num]
+            #del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
+            randimg(fn_old)
+    # if file name already exists in selected folder, gives error
     else:
         info_text_change("File name already exists in that folder!", 1)
 
@@ -337,7 +382,6 @@ def choose_directory():
 
 # first window that pops up
 # tells the user to select a directory to use the program
-
 def dir_select_window():
     global dir_select, dir_label
     dir_select = tk.Toplevel()
@@ -365,26 +409,30 @@ def dir_select_window():
     dir_button.pack(side='left')
 
 def gif_loop():
-    global gif_timer, gif_frame_num, img
-    if play_gif != False:
-        gif_frame_num += 1
-        if gif_frame_num >= len(gif_frames):
-            gif_frame_num = 0
-        # turns PIL Image into an ImageTk PhotoImage object
-        img = ImageTk.PhotoImage(gif_frames[gif_frame_num])
-        panel.configure(image=img)
-        panel.image = img
-        gif_timer = threading.Timer(gif_avg_time, gif_loop)
-        gif_timer.start()
-    else:
-        gif_timer.cancel()
+    global gif_frame_num, img
+    while(True):
+        time.sleep(gif_avg_time)
+        if play_gif != False:
+            gif_lock.acquire()
+            gif_frame_num += 1
+            if gif_frame_num >= len(gif_frames):
+                gif_frame_num = 0
+
+            # turns PIL Image into an ImageTk PhotoImage object
+            img = ImageTk.PhotoImage(gif_frames[gif_frame_num])
+            panel.configure(image=img)
+            panel.image = img
+            gif_lock.release()
+        else:
+            sys.exit()
+            print("Exited GIF thread.")
 
 def gif_player():
-    global play_gif, gif_timer
+    global play_gif, gif_thread, gif_frame_num
     play_gif = True
     gif_frame_num = 0
-    gif_timer = threading.Timer(1, gif_loop)
-    gif_timer.start()
+    gif_thread = threading.Thread(target=gif_loop)
+    gif_thread.start()
 
 def delete_file():
     global file_path, file_name, file_dir, file_name_noext, file_ext
@@ -398,12 +446,13 @@ def delete_file():
                 print(e)
             else:
                 info_text_change("File '" + file_name[num] + "' was deleted!", 0)
-                del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
+                #del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
                 randimg()
         else:
             info_text_change("File could not be deleted :(", 1)
 
-
+def open_default():
+    webbrowser.open(file_path[num])
 
 def main_window():
     global root_path, window, top_frame, bottom_frame, info_frame, img_frame, rename_frame, button_frame, dir_margin, dir_header, dir_frame, create_folder_frame, dir_frame_col1, dir_frame_col2, dir_frame_col3, info_text, panel, rename_butt, rand_butt, rename_val, rename_tbox, rename_ext, newdir_val, dir_buttons, create_folder_butt, resized, img, dir_win
@@ -455,7 +504,7 @@ def main_window():
     dir_frame_col3.pack(side="left")
 
     # sets the notification text's default height, lets the text wrap, and sets the text to blank
-    info_text = tk.Label(info_frame, text=" ", wraplength=440, height=2)
+    info_text = tk.Label(info_frame, text=" ", wraplength=440, height=3)
     info_text.pack()
 
     # label where the image is displayed
@@ -468,6 +517,9 @@ def main_window():
     # button for random file operation
     rand_butt = tk.Button(button_frame, text="Random file", command=rand_butt_click)
     rand_butt.pack(side= 'left')
+    # button for opening file in default program
+    open_butt = tk.Button(button_frame, text="Open in Default", command=open_default)
+    open_butt.pack(side= 'left')
     # button to delete file
     delete_butt = tk.Button(button_frame, text="Delete file", command=delete_file, fg="red")
     delete_butt.pack(side= 'bottom')
@@ -521,7 +573,7 @@ play_gif = False
 # stores each gif image/frame
 gif_frames = []
 # stores the timer
-gif_timer = ""
+gif_thread = ""
 # gif frame counter
 gif_frame_num = 0
 # stores entire gif duration
