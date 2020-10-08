@@ -11,6 +11,7 @@ from functools import partial
 import threading
 import time
 import webbrowser
+import hashlib
 
 # FEATURES TO ADD
 # Back button for when you misclick (up to like 50-100 images?)
@@ -50,11 +51,6 @@ file_ext = []
 # immediate directory names
 dir_names = []
 
-# stores gif thread for displaying frames in a gif file
-gif_thread = ""
-# lock for gif thread
-gif_lock = threading.Lock()
-
 # gets all files in folder
 # add break to not include subdirectories
 
@@ -63,6 +59,7 @@ root_path = ""
 #    root_path = root_path + os.path.sep
 #    print("NOOO")
 
+stop_dupe_dialog = False
 
 num = 0
 
@@ -100,9 +97,12 @@ def img_update():
             file_ext.append("NO_EXT")
 
 # resizes image to fit in tkinter's image display box
-def img_resizer(side_max):
+def img_resizer(side_max, f_path = ''):
     #gets image from path
-    orig = Image.open(file_path[num])
+    if f_path == '':
+        orig = Image.open(file_path[num])
+    else:
+        orig = Image.open(f_path)
 
     # gets width and height for resizing
     width, height = orig.size
@@ -129,11 +129,10 @@ def img_resizer(side_max):
 
 # picks a random image
 def randimg(fn_old = None):
-    global num, gif_frames, play_gif, gif_duration, gif_avg_time, play_gif, gif_thread
-    if not isinstance(gif_thread, str):
+    global num, gif_frames, play_gif, gif_duration, gif_avg_time, play_gif
+    if play_gif == True:
         play_gif = False
-        time.sleep(.1)
-        gif_thread = ""
+        time.sleep(.2)
     if fn_old is not None:
         file_name_old = fn_old
     else:
@@ -180,7 +179,8 @@ def randimg(fn_old = None):
                     i += 1
                 except Exception as e:
                     #print(e)
-                    gif_avg_time = (gif_duration/len(gif_frames))/1000
+                    gif_avg_time = round(gif_duration/len(gif_frames))
+                    print(gif_avg_time)
                     play_gif = True
                     gif_player()
                     resized = img_resizer(400)
@@ -308,6 +308,109 @@ def rand_butt_click():
     info_text_clear()
     randimg()
 
+dupe_win = ''
+
+def make_dupe_window(fpath_list, progress, dupe_win):
+    try:
+        dupe_win.grab_set()
+    except Exception as e:
+        print(e)
+    dupe_win.geometry("650x600")
+    center_window([650, 600], dupe_win)
+    dupe_win.title("Duplicate Checker")
+    dupe_win.resizable(width=False, height=False)
+
+    top_fr = tk.Frame(dupe_win)
+    top_fr.pack()
+    img_frame = tk.Frame(dupe_win)
+    img_frame.pack()
+    bot_fr = tk.Frame(dupe_win)
+    bot_fr.pack(side="bottom")
+
+    top_text = tk.Label(top_fr, text="Choose which duplicates to keep (" + str(progress[0]) + "/" + str(progress[1]) + "): \n(Must choose one)")
+    top_text.pack()
+
+    img_list = []
+    img_info_list = []
+    img_text_list = []
+    chk_list = []
+    chk_f_num_list = []
+
+    final = False
+    if progress[0] == progress[1]:
+        final = True
+
+    i = 0
+    for img in fpath_list:
+        img_info_list.append(tk.Frame(img_frame))
+        img_info_list[-1].pack(fill="x")
+        img_list.append(tk.Label(img_info_list[-1], height = 100, width = 100, padx=15))
+        img_list[-1].pack(side='left', fill="both", expand=False)
+
+        cur_path = img
+        cur_dir = cur_path[0:(cur_path.rfind(os.sep))]
+        cur_name = cur_path[(cur_path.rfind(os.sep)) + 1:]
+
+        chk_f_num_list.append(tk.IntVar())
+
+        chk_list.append(tk.Checkbutton(img_info_list[-1], variable=chk_f_num_list[-1]))
+        chk_list[-1].pack(side="left")
+
+        img_text_string = "File name: " + cur_name + "\nDirectory: " + cur_dir + "\nFile size: " + str(math.floor(os.path.getsize(cur_path)/1024)) + " KB\n"
+        img_text_list.append(tk.Label(img_info_list[-1], text=img_text_string, justify=tk.RIGHT, padx=15))
+        img_text_list[-1].pack(side='right')
+        img_text_list[-1].configure(font=("TkDefaultFont", 10))
+
+        if i == 0:
+            chk_list[-1].select()
+
+        resized = img_resizer(100, img)
+        
+        img = ImageTk.PhotoImage(resized)
+
+        img_list[-1].configure(image=img)
+        img_list[-1].image = img
+
+        i += 1
+
+    # if "Stop Checking" button clicked, the duplicate dialog boxes stop, and you're brought back to the main window
+    def stop_checking_pressed():
+        global stop_dupe_dialog
+        stop_dupe_dialog = True
+        dupe_win.grab_release()
+        dupe_win.destroy()
+        randimg()
+
+    # when "Keep Selected..." clicked, keeps files that are selected, and deletes files that are unselected
+    def dupe_win_pressed():
+        files_keep = []
+        files_delete = []
+        # checks if any check boxes were selected, and figures out keep/delete files accordingly
+        for i in range(len(chk_f_num_list)):
+            if chk_f_num_list[i].get():
+                files_keep.append(fpath_list[i])
+            else:
+                files_delete.append(fpath_list[i])
+        # does not allow user to leave the dialog box until at least one image is checked
+        if len(files_keep) >= 1:
+            # deletes all unselected files
+            for del_file_path in files_delete:
+                if os.path.exists(del_file_path):
+                    try:
+                        os.remove(del_file_path)
+                    except Exception as e:
+                        print(e)
+            dupe_win.grab_release()
+            dupe_win.destroy()
+        if final:
+            randimg()
+
+    # bottom buttons
+    keep_button = tk.Button(bot_fr, padx=10, text="Keep Selected...", command = dupe_win_pressed)
+    keep_button.pack(side="left")
+    stop_dupe_button = tk.Button(bot_fr, padx=10, text="Stop Checking", command = stop_checking_pressed)
+    stop_dupe_button.pack(side="left")
+    
 def make_dir_window():
     global newdir_val
     global dir_win
@@ -317,7 +420,7 @@ def make_dir_window():
 
     dir_win = tk.Toplevel()
     dir_win.geometry("400x100")
-    dir_win.title("Create New Directory")
+    dir_win.title("Create New Folder")
     dir_win.resizable(width=False, height=False)
 
     margin = tk.Frame(dir_win, height=20)
@@ -356,7 +459,10 @@ def dir_update():
 
 # brings up the directory selection dialog box and takes care of handling
 def choose_directory():
-    global root_path
+    global root_path, window
+    # disables the use of any window besides the directory selection box
+    dir_select.grab_set()
+    # brings the directory select window to focus
     dir_select.attributes('-topmost', False)
     chosen_dir = tk.filedialog.askdirectory()
     # if a directory was chosen, the main window is created
@@ -371,7 +477,21 @@ def choose_directory():
             # if file type supported, the main program is started and the directory dialog is closed
             if i in supported_types:
                 file_exists = True
+                # control is reenabled for all windows
+                dir_select.grab_release()
                 dir_select.destroy()
+                # resets the window if it is already set for a directory change
+                if 'window' in globals():
+                    try:
+                        window.destroy()
+                    except Exception as e:
+                        print(e)
+                    window = tk.Tk()
+                    window.title("File Sorter")
+                    window.geometry("450x900")
+                    center_window([450, 900], window)
+                    window.resizable(width=False, height=True)
+
                 main_window()
                 break
         # if no files have a compatible type, the program asks for a different directory
@@ -410,33 +530,36 @@ def dir_select_window():
 
 def gif_loop():
     global gif_frame_num, img
-    while(True):
-        time.sleep(gif_avg_time)
-        if play_gif != False:
-            gif_lock.acquire()
-            gif_frame_num += 1
-            if gif_frame_num >= len(gif_frames):
-                gif_frame_num = 0
+    if play_gif != False:
+        # prepares to run next frame once gif's average frame time passes
+        window.after(gif_avg_time, gif_loop)
+        gif_frame_num += 1
+        if gif_frame_num >= len(gif_frames):
+            gif_frame_num = 0
 
-            # turns PIL Image into an ImageTk PhotoImage object
-            img = ImageTk.PhotoImage(gif_frames[gif_frame_num])
-            panel.configure(image=img)
-            panel.image = img
-            gif_lock.release()
-        else:
-            sys.exit()
-            print("Exited GIF thread.")
+        # turns PIL Image into an ImageTk PhotoImage object
+        img = ImageTk.PhotoImage(gif_frames[gif_frame_num])
+        panel.configure(image=img)
+        panel.image = img
+    else:
+        print("Exited GIF player.")
 
+# starts initial launch of gif file animation
 def gif_player():
     global play_gif, gif_thread, gif_frame_num
+    # when set to false, gif_loop discontinues
     play_gif = True
+    # starts off the first animated frame of the gif
+    gif_loop()
     gif_frame_num = 0
-    gif_thread = threading.Thread(target=gif_loop)
-    gif_thread.start()
 
+# deletes selected file after a warning prompt; triggered by 'Delete file' button
 def delete_file():
     global file_path, file_name, file_dir, file_name_noext, file_ext
+    
+    # Yes/No Prompt to be sure the user wanted to delete the selected file
     MsgBox = messagebox.askquestion('Delete File', 'Are you sure you want to delete this file?', icon='warning')
+    # If user selected yes, file gets deleted
     if MsgBox == 'yes':
         if os.path.exists(file_path[num]):
             try:
@@ -446,13 +569,115 @@ def delete_file():
                 print(e)
             else:
                 info_text_change("File '" + file_name[num] + "' was deleted!", 0)
-                #del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
                 randimg()
         else:
             info_text_change("File could not be deleted :(", 1)
 
+# opens the file in its default program
 def open_default():
     webbrowser.open(file_path[num])
+
+# Checks for image duplicates, either including subdirectory images or not
+def duplicate_search():
+    # If user hits the button indicating to stop checking duplicates,
+    # then this is set to false, closing all future dialogs
+    global stop_dupe_dialog
+
+    # updates current directory for if user selects 'No' in Subdirectory prompt
+    dir_update()
+    
+    # stores shrinked and grey scaled thumbnail used for image duplicate comparisons
+    grey_scaled = []
+
+    # each grey scaled image gets converted to an md5 according to each pixel's color value/16
+    grey_md5 = []
+
+    # if a duplicate is found, this dict will contain them
+    # still contains singles, just skipped over
+    md5_dict = {}
+
+    files_to_search = []
+    files_to_search_ext = []
+    MsgBox = tk.messagebox.askquestion("Search in Subdirectory?", "Do you also want to search for duplicates in subdirectories?", icon='question')
+    if MsgBox == 'yes':
+        for (dirpath, dirnames, filenames) in os.walk( root_path ):
+            files_to_search.extend(os.path.join(dirpath, filename) for filename in filenames)
+        for item in files_to_search:
+            if '.' in item:
+                split_vals = item.rsplit('.', 1)
+                files_to_search_ext.append(split_vals[1])
+            else:
+                files_to_search_ext.append("NO_EXT")
+    else:
+        files_to_search = file_path
+        files_to_search_ext = file_ext
+
+    for i in range(len(files_to_search)):
+        f = None
+        if files_to_search_ext[i] in supported_types:
+            f = files_to_search[i]
+        else:
+            grey_scaled.append('')
+            grey_md5.append('')
+            continue
+        # shrinks the image with antialiasing, then converts it to greyscale
+        grey_scaled.append(Image.open(f).resize((16, 16),Image.ANTIALIAS).convert('LA'))
+        pixel_val = ''
+
+        # gets current image and loads it to look at each pixel
+        px = grey_scaled[-1].load()
+        for x in range(16):
+            for y in range(16):
+                # divide's color value by 16 for easier comparison between files
+                color = px[x, y][0]
+                pixel_val += str((math.floor(color/16))) + ","
+        grey_md5.append(hashlib.md5(pixel_val.encode()).hexdigest())
+        if grey_md5[-1] in md5_dict:
+            md5_dict[grey_md5[-1]].add(i)
+        else:
+            md5_dict[grey_md5[-1]] = {i}
+
+    md5_with_dupe = []
+    total_to_check = 0
+    for md5 in md5_dict:
+        if len(md5_dict[md5]) >= 2:
+            md5_with_dupe.append(md5)
+            total_to_check += 1
+
+    i = 0
+    for md5 in md5_with_dupe:
+        if len(md5_dict[md5]) >= 2:
+            i += 1
+            fpath_list = []
+            f_num = []
+            for fnum in md5_dict[md5]:
+                fpath_list.append(files_to_search[fnum])
+                f_num.append(fnum)
+            dupe_win = tk.Toplevel()
+            make_dupe_window(fpath_list, [i, total_to_check], dupe_win)
+            window.wait_window(dupe_win)
+            if stop_dupe_dialog == True:
+                stop_dupe_dialog = False
+                break
+
+    if len(md5_with_dupe) <= 0:
+        messagebox.showinfo("No Duplicates", "No duplicates were found!")
+
+def center_window(size, w = None):
+
+    if w == None:
+        w = window
+
+    window_width = size[0]
+    window_height = size[1]
+
+    screen_width = w.winfo_screenwidth()
+    screen_height = w.winfo_screenheight()
+
+    x_cordinate = int((screen_width/2) - (window_width/2))
+    y_cordinate = int((screen_height/2) - (window_height/2))
+
+    w.geometry("{}x{}+{}+{}".format(window_width, window_height, x_cordinate, y_cordinate))
 
 def main_window():
     global root_path, window, top_frame, bottom_frame, info_frame, img_frame, rename_frame, button_frame, dir_margin, dir_header, dir_frame, create_folder_frame, dir_frame_col1, dir_frame_col2, dir_frame_col3, info_text, panel, rename_butt, rand_butt, rename_val, rename_tbox, rename_ext, newdir_val, dir_buttons, create_folder_butt, resized, img, dir_win
@@ -540,7 +765,11 @@ def main_window():
 
     newdir_val = tk.StringVar()
     create_folder_butt = tk.Button(create_folder_frame, text="Create new folder...", command=make_dir_window)
-    create_folder_butt.pack(side='bottom')
+    create_folder_butt.pack(side='top')
+    check_dupes_butt = tk.Button(create_folder_frame, text="Check for duplicates", command=duplicate_search)
+    check_dupes_butt.pack(side='top')
+    change_folder_butt = tk.Button(create_folder_frame, text="Change working directory...", command=dir_select_window)
+    change_folder_butt.pack(side='top')
 
     # clears the textbox
     rename_tbox.delete(0, tk.END)
@@ -561,7 +790,8 @@ window = top_frame = bottom_frame = info_frame = img_frame = rename_frame = butt
 #creates tkinter window with options
 window = tk.Tk()
 window.title("File Sorter")
-window.geometry("450x850")
+window.geometry("450x900")
+center_window([450, 900], window)
 window.resizable(width=False, height=True)
 #window.configure(background='grey')
 
@@ -572,8 +802,6 @@ dir_buttons = []
 play_gif = False
 # stores each gif image/frame
 gif_frames = []
-# stores the timer
-gif_thread = ""
 # gif frame counter
 gif_frame_num = 0
 # stores entire gif duration
