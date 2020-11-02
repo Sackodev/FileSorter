@@ -1,17 +1,12 @@
-import os
-import sys
+import os, sys, subprocess
+import math, random, time, hashlib
 import tkinter.filedialog
 from tkinter import messagebox
 import tkinter as tk
 from PIL import ImageTk, Image
 import math
 import random
-import os
 from functools import partial
-import threading
-import time
-import webbrowser
-import hashlib
 
 # FEATURES TO ADD
 # Back button for when you misclick (up to like 50-100 images?)
@@ -51,13 +46,13 @@ file_ext = []
 # immediate directory names
 dir_names = []
 
+# list of gif jobs (thread)
+gif_job_list = []
+
 # gets all files in folder
 # add break to not include subdirectories
 
 root_path = ""
-#if root_path[-1] != os.path.sep:
-#    root_path = root_path + os.path.sep
-#    print("NOOO")
 
 stop_dupe_dialog = False
 
@@ -97,12 +92,17 @@ def img_update():
             file_ext.append("NO_EXT")
 
 # resizes image to fit in tkinter's image display box
-def img_resizer(side_max, f_path = ''):
+def img_resizer(side_max, f = None):
     #gets image from path
-    if f_path == '':
+    if f == None:
         orig = Image.open(file_path[num])
+    elif isinstance(f, str):
+        orig = Image.open(f)
+    elif type(f) is Image.Image:
+        orig = f
     else:
-        orig = Image.open(f_path)
+        print(type(f))
+        print("Error!")
 
     # gets width and height for resizing
     width, height = orig.size
@@ -127,12 +127,46 @@ def img_resizer(side_max, f_path = ''):
     # returns pil image
     return resized
 
+# processes all the gif frames, then starts the gif player
+def get_gif_frames():
+    global gif_frames, gif_duration, gif_avg_time, play_gif, resized
+    gif_frames = []
+    gif_img = Image.open(file_path[num])
+    i = 0
+    gif_duration = 0
+    gif_avg_time = 0
+    while True:
+        try:
+            gif_img.seek(i)
+            gif_duration += gif_img.info['duration']
+            gif_frames.append(gif_img.copy())
+            # PIL Image object can be resized
+            
+            gif_frames[i] = img_resizer(400, gif_frames[i])
+            i += 1
+        # if EOFError raised, there are no more frames in the gif image, so avg frame time is calculated and gif starts playing
+        except EOFError:
+            gif_avg_time = round(gif_duration/len(gif_frames))
+            play_gif = True
+            gif_player()
+            resized = img_resizer(400)
+            break
+
 # picks a random image
 def randimg(fn_old = None):
-    global num, gif_frames, play_gif, gif_duration, gif_avg_time, play_gif
-    if play_gif == True:
-        play_gif = False
-        time.sleep(.2)
+    global num, gif_frames, play_gif, gif_duration, gif_avg_time, play_gif, gif_job_list
+
+    # checks if gif is already running; if so, cancel any frames waiting to be played
+    if len(gif_job_list) > 0:
+        # cycles through gif frame jobs that may be pending
+        for i in range(len(gif_job_list)):
+            try:
+                # cancels a pending gif frame job
+                window.after_cancel(gif_job_list[i])
+        # clears the list of gif jobs
+        gif_job_list = []
+    play_gif = False
+
     if fn_old is not None:
         file_name_old = fn_old
     else:
@@ -143,51 +177,32 @@ def randimg(fn_old = None):
     file_count_old = len(file_name)
     img_update()
     dir_update()
-    file_exists = False
-    for i in file_ext:
-        if i in supported_types:
-            file_exists = True
-            break
-    if file_exists:
+
+    # checks if there's any more files to sort
+    if len(file_name) > 0:
         # picks a random compatible file that is not the same as the last file, if possible
         while (True):
             # picks random file from list
             num = random.randint(0, len(file_name) - 1)
-            # checks if selected file is supported; if it isn't compatible, another number is chosen
-            if file_ext[num] in supported_types:
-                # prevents selecting the same file twice if it can be avoided
-                # len(file_name) used to get size of file list
-                if file_name_old == file_name[num] and len(file_name) != 1:
-                    continue
-                # if selected file gets through all the checks, the file is kept and the loop is ended
-                break
-        
-        # gif handling
-        if file_ext[num] == "gif":
-            gif_frames = []
-            gif_img = Image.open(file_path[num])
-            i = 0
-            gif_duration = 0
-            gif_avg_time = 0
-            while True:
-                try:
-                    gif_img.seek(i)
-                    gif_duration += gif_img.info['duration']
-                    gif_frames.append(gif_img.copy())
-                    # PIL Image object can be resized
-                    gif_frames[i] = gif_frame_resize(gif_frames[i], 400)
-                    i += 1
-                except Exception as e:
-                    #print(e)
-                    gif_avg_time = round(gif_duration/len(gif_frames))
-                    print(gif_avg_time)
-                    play_gif = True
-                    gif_player()
-                    resized = img_resizer(400)
-                    break
-        else:
-            resized = img_resizer(400)
 
+            # if file is the same as the last one chosen, another one is chosen
+            if file_name_old == file_name[num] and len(file_name) != 1:
+                continue
+            # if selected file gets through the above check, the file is kept and the loop is ended
+            break
+        
+        # if the file is a gif, all gif frames are resized and stored, then played
+        if file_ext[num] == "gif":
+            get_gif_frames()
+            resized = img_resizer(400)
+        # if the file is an image type, a resized version of the image is shown
+        elif file_ext[num] in supported_types:
+            resized = img_resizer(400)
+        # if any other type (ex. pdf, zip), a generic image of a file is shown
+        else:
+            resized = Image.open(os.path.dirname(os.path.abspath(__file__)) + "/icons/other_file.png")
+
+        # sets up the file image for display in the GUI
         if not len(file_name) == 1 and not file_count_old == 1:
             img = ImageTk.PhotoImage(resized)
 
@@ -199,7 +214,7 @@ def randimg(fn_old = None):
 
             # clears the textbox
             rename_tbox.delete(0, tk.END)
-            # places a default value in the textbox
+            # places the current file's name in the textbox
             rename_tbox.insert(0, file_name_noext[num])
     else:
         info_text_change("No more compatible files to sort!", 1)
@@ -284,7 +299,6 @@ def move_file(d_name):
             else:
                 info_text_change("File '" + file_name[num] + "' was moved to '" + d_name + "' folder!", 0)
             fn_old = file_name[num]
-            #del file_path[num], file_name[num], file_dir[num], file_name_noext[num], file_ext[num]
             randimg(fn_old)
     # if file name already exists in selected folder, gives error
     else:
@@ -470,30 +484,28 @@ def choose_directory():
     if not chosen_dir:
         sys.exit()
     else:
-        root_path = chosen_dir + os.path.sep
-        img_update()
-        file_exists = False
-        for i in file_ext:
-            # if file type supported, the main program is started and the directory dialog is closed
-            if i in supported_types:
+        while(True):
+            root_path = chosen_dir + os.path.sep
+            img_update()
+            if len(file_name) > 0:
                 file_exists = True
-                # control is reenabled for all windows
-                dir_select.grab_release()
-                dir_select.destroy()
-                # resets the window if it is already set for a directory change
-                if 'window' in globals():
-                    try:
-                        window.destroy()
-                    except Exception as e:
-                        print(e)
-                    window = tk.Tk()
-                    window.title("File Sorter")
-                    window.geometry("450x900")
-                    center_window([450, 900], window)
-                    window.resizable(width=False, height=True)
-
-                main_window()
                 break
+
+        dir_select.grab_release()
+        dir_select.destroy()
+        # resets the window if it is already set for a directory change
+        if 'window' in globals():
+            try:
+                window.destroy()
+            except Exception as e:
+                print(e)
+            window = tk.Tk()
+            window.title("File Sorter")
+            window.geometry("450x900")
+            center_window([450, 900], window)
+            window.resizable(width=False, height=True)
+
+        main_window()
         # if no files have a compatible type, the program asks for a different directory
         if file_exists == False:
             dir_select.attributes('-topmost', True)
@@ -529,10 +541,14 @@ def dir_select_window():
     dir_button.pack(side='left')
 
 def gif_loop():
-    global gif_frame_num, img
+    global gif_frame_num, img, gif_job_list
     if play_gif != False:
         # prepares to run next frame once gif's average frame time passes
-        window.after(gif_avg_time, gif_loop)
+        gif_job_id = window.after(gif_avg_time, gif_loop)
+        gif_job_list.append(gif_job_id)
+        if len(gif_job_list) > 5:
+            del gif_job_list[0]
+
         gif_frame_num += 1
         if gif_frame_num >= len(gif_frames):
             gif_frame_num = 0
@@ -546,7 +562,7 @@ def gif_loop():
 
 # starts initial launch of gif file animation
 def gif_player():
-    global play_gif, gif_thread, gif_frame_num
+    global play_gif, gif_frame_num
     # when set to false, gif_loop discontinues
     play_gif = True
     # starts off the first animated frame of the gif
@@ -575,7 +591,15 @@ def delete_file():
 
 # opens the file in its default program
 def open_default():
-    webbrowser.open(file_path[num])
+    # linux support
+    if sys.platform.startswith('linux'):
+        subprocess.call(["xdg-open", file_path[num]])
+    # MacOS support
+    elif sys.platform.startswith('darwin'):
+        subprocess.call(["open", file_path[num]])
+    # windows / iOS(?) support
+    else:
+        subprocess.call(["start", file_path[num]])
 
 # Checks for image duplicates, either including subdirectory images or not
 def duplicate_search():
